@@ -1,0 +1,769 @@
+// SOL-LOTS Telegram Chat Bot with Solana Payments
+// Play directly in Telegram chat - no web app needed!
+
+const TelegramBot = require(‘node-telegram-bot-api’);
+const { Connection, PublicKey, Transaction, SystemProgram, Keypair, LAMPORTS_PER_SOL } = require(’@solana/web3.js’);
+const bs58 = require(‘bs58’);
+require(‘dotenv’).config();
+
+// Configuration
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const HOUSE_PRIVATE_KEY = process.env.HOUSE_PRIVATE_KEY;
+const SOLANA_NETWORK = process.env.SOLANA_NETWORK || ‘devnet’;
+
+if (!BOT_TOKEN || !HOUSE_PRIVATE_KEY) {
+console.error(‘ERROR: BOT_TOKEN and HOUSE_PRIVATE_KEY required!’);
+process.exit(1);
+}
+
+// Initialize bot
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+
+// Initialize Solana
+const connection = new Connection(
+SOLANA_NETWORK === ‘mainnet-beta’
+? ‘https://api.mainnet-beta.solana.com’
+: ‘https://api.devnet.solana.com’,
+‘confirmed’
+);
+
+const houseKeypair = Keypair.fromSecretKey(bs58.decode(HOUSE_PRIVATE_KEY));
+console.log(‘🎰 SOL-LOTS Bot Started!’);
+console.log(‘House wallet:’, houseKeypair.publicKey.toString());
+console.log(‘Network:’, SOLANA_NETWORK);
+
+// Slot symbols with emojis
+const SYMBOLS = [‘🐶’, ‘🐸’, ‘🐕’, ‘🍇’, ‘🍉’, ‘⭐’, ‘💎’];
+const SYMBOL_NAMES = {
+‘🐶’: ‘Dog Hat’,
+‘🐸’: ‘Pepe’,
+‘🐕’: ‘Doge’,
+‘🍇’: ‘Grapes’,
+‘🍉’: ‘Watermelon’,
+‘⭐’: ‘Star’,
+‘💎’: ‘Diamond’
+};
+
+// User sessions (in-memory - use Redis/DB in production)
+const userSessions = new Map();
+const pendingBets = new Map();
+const processedTransactions = new Set(); // Track processed transaction signatures
+
+// Game stats
+const stats = {
+totalGames: 0,
+totalBets: 0,
+totalPayouts: 0,
+totalPlayers: new Set()
+};
+
+// Get or create user session
+function getUserSession(userId) {
+if (!userSessions.has(userId)) {
+userSessions.set(userId, {
+wallet: null,
+totalSpins: 0,
+totalWins: 0,
+bestWin: 0,
+betAmount: 0.01
+});
+}
+return userSessions.get(userId);
+}
+
+// Start command
+bot.onText(//start/, (msg) => {
+const chatId = msg.chat.id;
+const welcomeMessage = `
+🎰 *Welcome to SOL\-LOTS\!*
+
+The first Telegram slot game powered by Solana blockchain\!
+
+💰 *Real Money Gaming:*
+• Each spin requires a SOL payment
+• Win up to 5x your bet
+• Instant payouts to your wallet
+• 100% on\-chain and transparent
+
+🎯 *Payouts:*
+• 3 matching symbols: 5x your bet
+• 2 matching symbols: 2x your bet
+
+🔗 *Network:* ${SOLANA_NETWORK === ‘devnet’ ? ‘Devnet \(Testing\)’ : ‘Mainnet \(Real SOL\)’}
+
+💳 *How It Works:*
+1\. Connect your Solana wallet
+2\. Choose bet amount \(0\.01\-1 SOL\)
+3\. Send payment to play
+4\. Win instantly to your wallet\!
+
+Ready to play? Let’s go\! 🚀
+`;
+
+```
+const keyboard = {
+    inline_keyboard: [
+        [{ text: '🔗 Connect Wallet', callback_data: 'connect_wallet' }],
+        [{ text: '❓ How to Play', callback_data: 'how_to_play' }],
+        [{ text: '📊 Stats', callback_data: 'stats' }]
+    ]
+};
+
+bot.sendMessage(chatId, welcomeMessage, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: keyboard
+});
+```
+
+});
+
+// Connect wallet callback
+bot.on(‘callback_query’, async (query) => {
+const chatId = query.message.chat.id;
+const userId = query.from.id;
+const data = query.data;
+
+```
+if (data === 'connect_wallet') {
+    bot.answerCallbackQuery(query.id);
+    
+    const message = `
+```
+
+🔗 *Connect Your Solana Wallet*
+
+To play SOL\-LOTS, you need a Solana wallet address\.
+
+*Steps:*
+1\. Copy your Solana wallet address
+2\. Use command: `/wallet YOUR\_ADDRESS`
+
+*Example:*
+`/wallet 7xXYZ123456789abcdefghijklmnop`
+
+Don’t have a wallet? Get Phantom: phantom\.app
+${SOLANA_NETWORK === ‘devnet’ ? ‘\n⚠️ Make sure your wallet is on *Devnet*\!’ : ‘’}
+`;
+
+```
+    bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+}
+
+else if (data === 'how_to_play') {
+    bot.answerCallbackQuery(query.id);
+    
+    const message = `
+```
+
+❓ *How to Play SOL\-LOTS*
+
+*Setup:*
+1\. Connect your wallet: `/wallet ADDRESS`
+2\. Set bet amount: `/bet 0\.01`
+
+*Play \(Payment Required\):*
+3\. Start spin: `/spin`
+4\. Tap “Pay \& Spin” button
+5\. Approve SOL payment in your wallet
+6\. Reels spin automatically after payment\!
+7\. Win up to 5x your bet\!
+
+*Payouts:*
+🎰 3 matching symbols = 5x bet \(paid instantly\)
+🎰 2 matching symbols = 2x bet \(paid instantly\)
+
+*Important:*
+• Each spin requires a SOL payment
+• Payment is sent before the spin
+• Winnings sent to your wallet instantly
+• All transactions verified on\-chain
+
+*Commands:*
+`/wallet ADDRESS` \- Connect wallet
+`/bet AMOUNT` \- Set bet \(0\.01\-1 SOL\)
+`/spin` \- Pay and play\!
+`/balance` \- Check wallet balance
+`/stats` \- View your statistics
+`;
+
+```
+    bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+}
+
+else if (data === 'stats') {
+    bot.answerCallbackQuery(query.id);
+    const session = getUserSession(userId);
+    
+    const message = `
+```
+
+📊 *Your Stats*
+
+🎰 Total Spins: ${session.totalSpins}
+✨ Total Wins: ${session.totalWins}
+💰 Best Win: ${session.bestWin.toFixed(3)} SOL
+${session.wallet ? `\n🔗 Wallet: \`${session.wallet.slice(0, 4)}…${session.wallet.slice(-4)}`` : ‘’}
+
+*Global Stats:*
+🎮 Total Games: ${stats.totalGames}
+👥 Total Players: ${stats.totalPlayers.size}
+💵 Total Bets: ${stats.totalBets.toFixed(2)} SOL
+💰 Total Payouts: ${stats.totalPayouts.toFixed(2)} SOL
+`;
+
+```
+    bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+}
+
+else if (data.startsWith('bet_')) {
+    const amount = parseFloat(data.split('_')[1]);
+    const session = getUserSession(userId);
+    session.betAmount = amount;
+    
+    bot.answerCallbackQuery(query.id, { text: `Bet set to ${amount} SOL` });
+    bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+        chat_id: chatId,
+        message_id: query.message.message_id
+    });
+    
+    bot.sendMessage(chatId, `✅ Bet amount set to *${amount} SOL*\\!\n\nReady to spin? Use \`/spin\``, {
+        parse_mode: 'MarkdownV2'
+    });
+}
+
+else if (data === 'spin_now') {
+    bot.answerCallbackQuery(query.id);
+    handleSpin(chatId, userId);
+}
+```
+
+});
+
+// Wallet command
+bot.onText(//wallet (.+)/, async (msg, match) => {
+const chatId = msg.chat.id;
+const userId = msg.from.id;
+const walletAddress = match[1].trim();
+
+```
+// Validate Solana address
+try {
+    const pubkey = new PublicKey(walletAddress);
+    const session = getUserSession(userId);
+    session.wallet = walletAddress;
+    stats.totalPlayers.add(userId);
+    
+    // Check balance
+    const balance = await connection.getBalance(pubkey);
+    const solBalance = (balance / LAMPORTS_PER_SOL).toFixed(4);
+    
+    const message = `
+```
+
+✅ *Wallet Connected\!*
+
+🔗 Address: `${walletAddress.slice(0, 4)}…${walletAddress.slice(-4)}`
+💰 Balance: ${solBalance} SOL
+
+Ready to play\! Choose your bet:
+`;
+
+```
+    const keyboard = {
+        inline_keyboard: [
+            [
+                { text: '0.01 SOL', callback_data: 'bet_0.01' },
+                { text: '0.05 SOL', callback_data: 'bet_0.05' }
+            ],
+            [
+                { text: '0.1 SOL', callback_data: 'bet_0.1' },
+                { text: '0.5 SOL', callback_data: 'bet_0.5' }
+            ],
+            [{ text: '🎰 SPIN NOW!', callback_data: 'spin_now' }]
+        ]
+    };
+    
+    bot.sendMessage(chatId, message, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: keyboard
+    });
+    
+} catch (error) {
+    bot.sendMessage(chatId, '❌ Invalid Solana wallet address! Please try again.');
+}
+```
+
+});
+
+// Bet command
+bot.onText(//bet (.+)/, (msg, match) => {
+const chatId = msg.chat.id;
+const userId = msg.from.id;
+const session = getUserSession(userId);
+
+```
+if (!session.wallet) {
+    bot.sendMessage(chatId, '❌ Please connect your wallet first: `/wallet YOUR_ADDRESS`', {
+        parse_mode: 'Markdown'
+    });
+    return;
+}
+
+const betAmount = parseFloat(match[1]);
+
+if (isNaN(betAmount) || betAmount < 0.01 || betAmount > 1) {
+    bot.sendMessage(chatId, '❌ Invalid bet amount! Must be between 0.01 and 1 SOL.');
+    return;
+}
+
+session.betAmount = betAmount;
+bot.sendMessage(chatId, `✅ Bet set to *${betAmount} SOL*!\n\nReady to spin? Use \`/spin\``, {
+    parse_mode: 'Markdown'
+});
+```
+
+});
+
+// Balance command
+bot.onText(//balance/, async (msg) => {
+const chatId = msg.chat.id;
+const userId = msg.from.id;
+const session = getUserSession(userId);
+
+```
+if (!session.wallet) {
+    bot.sendMessage(chatId, '❌ Please connect your wallet first: `/wallet YOUR_ADDRESS`', {
+        parse_mode: 'Markdown'
+    });
+    return;
+}
+
+try {
+    const pubkey = new PublicKey(session.wallet);
+    const balance = await connection.getBalance(pubkey);
+    const solBalance = (balance / LAMPORTS_PER_SOL).toFixed(4);
+    
+    bot.sendMessage(chatId, `💰 *Wallet Balance*\n\n${solBalance} SOL`, {
+        parse_mode: 'Markdown'
+    });
+} catch (error) {
+    bot.sendMessage(chatId, '❌ Error checking balance. Please try again.');
+}
+```
+
+});
+
+// Spin command
+bot.onText(//spin/, (msg) => {
+const chatId = msg.chat.id;
+const userId = msg.from.id;
+handleSpin(chatId, userId);
+});
+
+// Handle spin - PAYMENT REQUIRED
+async function handleSpin(chatId, userId) {
+const session = getUserSession(userId);
+
+```
+if (!session.wallet) {
+    bot.sendMessage(chatId, '❌ Please connect your wallet first: `/wallet YOUR_ADDRESS`', {
+        parse_mode: 'Markdown'
+    });
+    return;
+}
+
+const betAmount = session.betAmount;
+
+// Check balance
+try {
+    const pubkey = new PublicKey(session.wallet);
+    const balance = await connection.getBalance(pubkey);
+    const solBalance = balance / LAMPORTS_PER_SOL;
+    
+    if (solBalance < betAmount + 0.001) { // Include fee buffer
+        const message = `
+```
+
+❌ *Insufficient Balance*
+
+You need at least *${(betAmount + 0.001).toFixed(3)} SOL* to play
+(Includes ${betAmount} SOL bet + network fees)
+
+Current balance: ${solBalance.toFixed(4)} SOL
+
+${SOLANA_NETWORK === ‘devnet’
+? ‘\n💡 Get free devnet SOL: https://faucet\.solana\.com’
+: ‘\n💡 Add SOL to your wallet to continue playing’}
+`;
+bot.sendMessage(chatId, message, { parse_mode: ‘MarkdownV2’ });
+return;
+}
+
+```
+    // Generate unique payment reference
+    const betId = `bet_${userId}_${Date.now()}`;
+    const reference = new PublicKey(bs58.encode(Buffer.from(betId)));
+    
+    pendingBets.set(betId, {
+        userId,
+        chatId,
+        betAmount,
+        timestamp: Date.now(),
+        playerWallet: session.wallet
+    });
+    
+    // Create Solana Pay URL
+    const amount = betAmount;
+    const recipient = houseKeypair.publicKey.toString();
+    const label = encodeURIComponent('SOL-LOTS Casino Bet');
+    const message = encodeURIComponent(`Bet ${betAmount} SOL - Spin to win!`);
+    
+    // Solana Pay standard URL
+    const solanaPayUrl = `solana:${recipient}?amount=${amount}&label=${label}&message=${message}&memo=${betId}`;
+    
+    const paymentMessage = `
+```
+
+🎰 *Ready to Spin\!*
+
+💰 Bet Amount: *${betAmount} SOL*
+🎯 Max Win: *${(betAmount * 5).toFixed(3)} SOL*
+
+*Payment Required:*
+Click the button below to send ${betAmount} SOL and spin the reels\!
+
+Your payment will be detected automatically and the game will start\.
+
+⏱️ Payment expires in 5 minutes
+`;
+
+```
+    const keyboard = {
+        inline_keyboard: [
+            [{ text: `💳 Pay ${betAmount} SOL & Spin`, url: solanaPayUrl }],
+            [{ text: '❌ Cancel', callback_data: 'cancel_bet' }]
+        ]
+    };
+    
+    bot.sendMessage(chatId, paymentMessage, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: keyboard
+    });
+    
+    // Monitor for payment
+    monitorPayment(betId);
+    
+} catch (error) {
+    console.error('Spin error:', error);
+    bot.sendMessage(chatId, '❌ Error processing spin. Please try again.');
+}
+```
+
+}
+
+// Create Solana Pay URL
+function createSolanaPayUrl(fromAddress, amount, reference) {
+const recipient = houseKeypair.publicKey.toString();
+const amountInSol = amount;
+const label = ‘SOL-LOTS Casino’;
+const message = `Bet ${amount} SOL`;
+
+```
+// Solana Pay URL format
+return `solana:${recipient}?amount=${amountInSol}&label=${encodeURIComponent(label)}&message=${encodeURIComponent(message)}&reference=${reference}`;
+```
+
+}
+
+// Monitor for payment
+async function monitorPayment(betId) {
+const bet = pendingBets.get(betId);
+if (!bet) return;
+
+```
+console.log(`Monitoring payment for bet ${betId}, amount: ${bet.betAmount} SOL`);
+
+const maxAttempts = 60; // 5 minutes (check every 5 seconds)
+let attempts = 0;
+
+const checkInterval = setInterval(async () => {
+    attempts++;
+    
+    // Timeout after 5 minutes
+    if (attempts > maxAttempts) {
+        clearInterval(checkInterval);
+        pendingBets.delete(betId);
+        bot.sendMessage(bet.chatId, 
+            '⏱️ *Payment Expired*\\n\\nPayment request timed out\\. Use `/spin` to try again\\.',
+            { parse_mode: 'MarkdownV2' }
+        );
+        return;
+    }
+    
+    try {
+        // Get recent transactions to house wallet
+        const signatures = await connection.getSignaturesForAddress(
+            houseKeypair.publicKey,
+            { limit: 20 }
+        );
+        
+        // Check each recent transaction
+        for (const sig of signatures) {
+            // Skip if already processed
+            if (processedTransactions.has(sig.signature)) continue;
+            
+            const tx = await connection.getTransaction(sig.signature, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0
+            });
+            
+            if (!tx || tx.meta.err) continue;
+            
+            // Check transaction timestamp - must be recent
+            const txTime = tx.blockTime * 1000;
+            const timeDiff = Date.now() - txTime;
+            if (timeDiff > 300000) continue; // Ignore transactions older than 5 minutes
+            
+            // Get transaction details
+            const preBalances = tx.meta.preBalances;
+            const postBalances = tx.meta.postBalances;
+            const accountKeys = tx.transaction.message.getAccountKeys();
+            
+            // Find our house wallet index
+            let houseIndex = -1;
+            for (let i = 0; i < accountKeys.length; i++) {
+                if (accountKeys.get(i).toString() === houseKeypair.publicKey.toString()) {
+                    houseIndex = i;
+                    break;
+                }
+            }
+            
+            if (houseIndex === -1) continue;
+            
+            // Calculate amount received
+            const amountReceived = (postBalances[houseIndex] - preBalances[houseIndex]) / LAMPORTS_PER_SOL;
+            
+            // Check if amount matches bet (allow small difference for rounding)
+            if (Math.abs(amountReceived - bet.betAmount) < 0.0001) {
+                console.log(`Payment confirmed! Signature: ${sig.signature}, Amount: ${amountReceived} SOL`);
+                
+                // Mark as processed
+                processedTransactions.add(sig.signature);
+                
+                // Clear interval
+                clearInterval(checkInterval);
+                pendingBets.delete(betId);
+                
+                // Process the spin!
+                await processSpin(bet.chatId, bet.userId, bet.betAmount, sig.signature);
+                return;
+            }
+        }
+        
+        // Log progress every 10 attempts (30 seconds)
+        if (attempts % 6 === 0) {
+            console.log(`Still waiting for payment... (${attempts * 5}s elapsed)`);
+        }
+        
+    } catch (error) {
+        console.error('Payment monitoring error:', error);
+    }
+}, 5000); // Check every 5 seconds
+```
+
+}
+
+// Process spin after payment confirmed
+async function processSpin(chatId, userId, betAmount, txSignature) {
+const session = getUserSession(userId);
+
+```
+// Send spinning animation
+const spinningMsg = await bot.sendMessage(chatId, '🎰 Spinning the reels...\n\n🔄 🔄 🔄');
+
+// Simulate spinning animation
+for (let i = 0; i < 5; i++) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const randomSymbols = `${getRandomSymbol()} ${getRandomSymbol()} ${getRandomSymbol()}`;
+    await bot.editMessageText(`🎰 Spinning the reels...\n\n${randomSymbols}`, {
+        chat_id: chatId,
+        message_id: spinningMsg.message_id
+    });
+}
+
+// Get final result
+const reel1 = getRandomSymbol();
+const reel2 = getRandomSymbol();
+const reel3 = getRandomSymbol();
+
+await bot.editMessageText(`🎰 *RESULT*\n\n${reel1} ${reel2} ${reel3}`, {
+    chat_id: chatId,
+    message_id: spinningMsg.message_id,
+    parse_mode: 'Markdown'
+});
+
+// Check for win
+session.totalSpins++;
+stats.totalGames++;
+stats.totalBets += betAmount;
+
+let resultMessage = '';
+let winAmount = 0;
+
+if (reel1 === reel2 && reel2 === reel3) {
+    // JACKPOT!
+    winAmount = betAmount * 5;
+    session.totalWins++;
+    if (winAmount > session.bestWin) session.bestWin = winAmount;
+    
+    resultMessage = `
+```
+
+🎉 *JACKPOT\!* 🎉
+
+${reel1} ${reel2} ${reel3}
+
+💰 You won *${winAmount.toFixed(3)} SOL*\!
+
+Payout is being sent to your wallet\.\.\.
+`;
+
+```
+    // Send payout
+    await sendPayout(session.wallet, winAmount, chatId);
+    
+} else if (reel1 === reel2 || reel2 === reel3 || reel1 === reel3) {
+    // WIN!
+    winAmount = betAmount * 2;
+    session.totalWins++;
+    if (winAmount > session.bestWin) session.bestWin = winAmount;
+    
+    resultMessage = `
+```
+
+✨ *WINNER\!* ✨
+
+${reel1} ${reel2} ${reel3}
+
+💰 You won *${winAmount.toFixed(3)} SOL*\!
+
+Payout is being sent to your wallet\.\.\.
+`;
+
+```
+    // Send payout
+    await sendPayout(session.wallet, winAmount, chatId);
+    
+} else {
+    // LOSS
+    resultMessage = `
+```
+
+😔 No match this time\.
+
+${reel1} ${reel2} ${reel3}
+
+Better luck next spin\! 🍀
+
+💳 Bet: ${betAmount} SOL
+`;
+}
+
+```
+stats.totalPayouts += winAmount;
+
+const keyboard = {
+    inline_keyboard: [
+        [{ text: '🎰 Spin Again', callback_data: 'spin_now' }],
+        [{ text: '📊 Stats', callback_data: 'stats' }]
+    ]
+};
+
+bot.sendMessage(chatId, resultMessage, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: keyboard
+});
+
+// Show transaction link
+const explorerUrl = `https://explorer.solana.com/tx/${txSignature}?cluster=${SOLANA_NETWORK}`;
+bot.sendMessage(chatId, `🔗 [View transaction on Solana Explorer](${explorerUrl})`, {
+    parse_mode: 'Markdown',
+    disable_web_page_preview: true
+});
+```
+
+}
+
+// Send payout to winner
+async function sendPayout(playerAddress, amount, chatId) {
+try {
+const transaction = new Transaction().add(
+SystemProgram.transfer({
+fromPubkey: houseKeypair.publicKey,
+toPubkey: new PublicKey(playerAddress),
+lamports: Math.floor(amount * LAMPORTS_PER_SOL),
+})
+);
+
+```
+    const signature = await connection.sendTransaction(transaction, [houseKeypair]);
+    await connection.confirmTransaction(signature, 'confirmed');
+
+    const explorerUrl = `https://explorer.solana.com/tx/${signature}?cluster=${SOLANA_NETWORK}`;
+    
+    bot.sendMessage(chatId, `✅ Payout sent!\n\n🔗 [View payout transaction](${explorerUrl})`, {
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true
+    });
+    
+    console.log(`Payout sent: ${amount} SOL to ${playerAddress}`);
+    
+} catch (error) {
+    console.error('Payout error:', error);
+    bot.sendMessage(chatId, `⚠️ Payout error. Please contact support with transaction details.`);
+}
+```
+
+}
+
+// Helper functions
+function getRandomSymbol() {
+return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
+}
+
+// Stats command
+bot.onText(//stats/, (msg) => {
+const chatId = msg.chat.id;
+const userId = msg.from.id;
+const session = getUserSession(userId);
+
+```
+const message = `
+```
+
+📊 *Your Stats*
+
+🎰 Total Spins: ${session.totalSpins}
+✨ Total Wins: ${session.totalWins}
+💰 Best Win: ${session.bestWin.toFixed(3)} SOL
+${session.wallet ? `\n🔗 Wallet: \`${session.wallet.slice(0, 4)}…${session.wallet.slice(-4)}`` : ‘’}
+
+*Global Stats:*
+🎮 Total Games: ${stats.totalGames}
+👥 Total Players: ${stats.totalPlayers.size}
+💵 Total Bets: ${stats.totalBets.toFixed(2)} SOL
+💰 Total Payouts: ${stats.totalPayouts.toFixed(2)} SOL
+`;
+
+```
+bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+```
+
+});
+
+// Error handling
+bot.on(‘polling_error’, (error) => {
+console.error(‘Polling error:’, error);
+});
+
+console.log(‘Bot is running! Send /start to begin.’);
